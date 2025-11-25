@@ -1,145 +1,24 @@
-/**
- * Core Philosophy: This ruleset enforces a strict user-ownership model where all data is isolated within a user's own data tree. A user can only access documents located under their own unique user ID path (`/users/{userId}`). This approach guarantees data privacy and prevents users from accessing or even knowing about the existence of other users' information.
- *
- * Data Structure: The data is organized hierarchically, starting with a top-level `users` collection. Each user document, identified by their UID, serves as the root for their private data, including `conversations` and the `messages` within them. The structure is `/users/{userId}/conversations/{conversationId}/messages/{messageId}`.
- *
- * Key Security Decisions:
- * - User Isolation: All rules are based on the `{userId}` wildcard in the path. This ensures that a user's authentication UID must match the path segment to gain access.
- * - No User Enumeration: Listing documents in the top-level `/users` collection is explicitly disallowed to prevent malicious actors from discovering the list of all application users.
- * - Path-Based Security: Authorization decisions are made using the document path, which is highly performant and avoids costly `get()` calls to other documents.
- * - Default Deny: Access is denied by default. Permissions are only granted through explicit `allow` statements.
- *
- * Denormalization for Authorization: The hierarchical data structure itself is a form of denormalization for authorization. By nesting all user-content under `/users/{userId}`, the user's ID (the authorization key) is inherently part of the path to every document they own, simplifying security rules immensely. For example, a `Conversation` document contains a `userId` field, which is validated against the path on creation to ensure relational integrity without extra database reads.
- *
- * Structural Segregation: This ruleset exclusively defines the structure for private user data. All conversations and messages are stored in subcollections under a specific user, naturally segregating each user's data from others. This is a secure and performant pattern for managing user-owned content.
- */
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-
-    // ------------------------------------------------------------------------
-    // Helper Functions
-    // ------------------------------------------------------------------------
-
-    /**
-     * Returns true if the user is authenticated.
-     */
+    // Helper functions
     function isSignedIn() {
       return request.auth != null;
     }
 
-    /**
-     * Returns true if the authenticated user's UID matches the provided userId.
-     * This is the core function for enforcing data ownership.
-     */
     function isOwner(userId) {
       return isSignedIn() && request.auth.uid == userId;
     }
 
-    /**
-     * Returns true if the user is the owner and the document already exists.
-     * Used for safe update and delete operations.
-     */
-    function isExistingOwner(userId) {
-      return isOwner(userId) && resource != null;
-    }
-
-    /**
-     * Validates required user fields for authorization on create.
-     * In prototyping mode, this only checks for relational integrity.
-     */
-    function hasValidUserDataOnCreate(userId) {
-      return request.resource.data.id == userId;
-    }
-
-    /**
-     * Enforces immutability of critical, authorization-related user fields.
-     */
-    function isUserDataImmutable() {
-      return request.resource.data.id == resource.data.id;
-    }
-
-    /**
-     * Validates required conversation fields for authorization on create.
-     * Checks that the new document is correctly linked to the parent user.
-     */
-    function hasValidConversationDataOnCreate(userId) {
-      return request.resource.data.userId == userId;
-    }
-
-    /**
-     * Enforces immutability of the ownership link on a conversation document.
-     */
-    function isConversationDataImmutable() {
-      return request.resource.data.userId == resource.data.userId;
-    }
-
-    /**
-     * Validates required message fields for authorization on create.
-     * Checks that the new message is correctly linked to the parent conversation.
-     */
-    function hasValidMessageDataOnCreate(conversationId) {
-      return request.resource.data.conversationId == conversationId;
-    }
-
-    /**
-     * Enforces immutability of the ownership link on a message document.
-     */
-    function isMessageDataImmutable() {
-      return request.resource.data.conversationId == resource.data.conversationId;
-    }
-
-
-    // ------------------------------------------------------------------------
-    // Collection Rules
-    // ------------------------------------------------------------------------
-
-    /**
-     * @description Governs access to a user's own profile document.
-     * @path /users/{userId}
-     * @allow (create) A new user creating their own document where their auth UID matches the document ID.
-     * @allow (get, update, delete) An existing user accessing their own document.
-     * @deny (list) Any user, to prevent enumeration of all users in the system.
-     * @deny (get) User 'A' trying to read user 'B's profile.
-     * @principle Enforces Self-Creation and strict Ownership. A user can manage their own document but no one else's.
-     */
+    // Rules for the 'users' collection
     match /users/{userId} {
-      allow get: if isOwner(userId);
-      allow list: if false;
-      allow create: if isOwner(userId) && hasValidUserDataOnCreate(userId);
-      allow update: if isExistingOwner(userId) && isUserDataImmutable();
-      allow delete: if isExistingOwner(userId);
+      // Users can read and write their own document
+      allow read, write: if isOwner(userId);
 
-      /**
-       * @description Controls access to a user's private conversation documents.
-       * @path /users/{userId}/conversations/{conversationId}
-       * @allow (create) User 'user123' creating a new conversation at `/users/user123/conversations/convABC`.
-       * @allow (list) User 'user123' listing all of their own conversations.
-       * @deny (get) User 'user456' attempting to read a conversation at `/users/user123/conversations/convABC`.
-       * @deny (list) User 'user456' attempting to list conversations for 'user123'.
-       * @principle Restricts all access to the data owner based on the `{userId}` in the path.
-       */
+      // Rules for the 'conversations' subcollection
       match /conversations/{conversationId} {
-        allow get: if isOwner(userId);
-        allow list: if isOwner(userId);
-        allow create: if isOwner(userId) && hasValidConversationDataOnCreate(userId);
-        allow update: if isExistingOwner(userId) && isConversationDataImmutable();
-        allow delete: if isExistingOwner(userId);
-
-        /**
-         * @description Secures individual messages within a user's conversation.
-         * @path /users/{userId}/conversations/{conversationId}/messages/{messageId}
-         * @allow (get, list, create, update, delete) User 'user123' performing any action on a message within their own conversation tree.
-         * @deny (get) Any user trying to access messages under another user's ID, even if they know the full path.
-         * @principle Inherits ownership from the parent path, ensuring only the user can access their own messages.
-         */
-        match /messages/{messageId} {
-          allow get: if isOwner(userId);
-          allow list: if isOwner(userId);
-          allow create: if isOwner(userId) && hasValidMessageDataOnCreate(conversationId);
-          allow update: if isExistingOwner(userId) && isMessageDataImmutable();
-          allow delete: if isExistingOwner(userId);
-        }
+        // Users can read, list, create, update, and delete their own conversations
+        allow read, list, create, update, delete: if isOwner(userId);
       }
     }
   }

@@ -4,7 +4,7 @@ import { useActionState, useEffect, useRef, useState, useMemo } from 'react';
 import { useFormStatus } from 'react-dom';
 import Link from 'next/link';
 import { generateDocumentsAction } from '@/lib/actions';
-import type { Message, ChatCompletion } from '@/lib/types';
+import type { Message, ChatCompletion, Conversation } from '@/lib/types';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import {
@@ -27,6 +27,10 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import { useFirebase } from '@/firebase';
+import { collection, doc, addDoc, serverTimestamp } from 'firebase/firestore';
+import { setDocumentNonBlocking, addDocumentNonBlocking } from '@/firebase/non-blocking-updates';
+import { useRouter } from 'next/navigation';
 
 const botQuestions = [
   "Hello! I'm AnalystAI. To start, what business process or feature are we looking to define today?",
@@ -58,17 +62,20 @@ function FinalizeButton({ isFinished }: { isFinished: boolean }) {
   );
 }
 
-export function ChatPanel() {
-  const [messages, setMessages] = useState<Message[]>([
+export function ChatPanel({ conversation: initialConversation }: { conversation?: WithId<Conversation> }) {
+  const [messages, setMessages] = useState<Message[]>(initialConversation?.messages || [
     { role: 'assistant', content: botQuestions[0] },
   ]);
-  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(1);
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(initialConversation ? botQuestions.length : 1);
   const [inputValue, setInputValue] = useState('');
-  const [isFinalized, setIsFinalized] = useState(false);
+  const [isFinalized, setIsFinalized] = useState(!!initialConversation?.isFinalized);
   
   const [state, formAction] = useActionState(generateDocumentsAction, initialState);
   const { toast } = useToast();
   const scrollAreaRef = useRef<HTMLDivElement>(null);
+  const { user, firestore } = useFirebase();
+  const router = useRouter();
+
 
   const userAvatar = useMemo(() => PlaceHolderImages.find(img => img.id === 'user-avatar'), []);
 
@@ -78,8 +85,22 @@ export function ChatPanel() {
     }
     if (state?.message === 'success' && state.documents) {
         setIsFinalized(true);
+        if (user && firestore && !initialConversation) {
+          const conversationsRef = collection(firestore, 'users', user.uid, 'conversations');
+          addDocumentNonBlocking(conversationsRef, {
+            title: messages.find(m => m.role === 'user')?.content.substring(0, 30) || 'New Conversation',
+            messages,
+            startTime: serverTimestamp(),
+            isFinalized: true,
+            documents: state.documents,
+          }).then((docRef) => {
+            if (docRef) {
+              router.push(`/chat/${docRef.id}`);
+            }
+          });
+        }
     }
-  }, [state, toast]);
+  }, [state, toast, user, firestore, messages, initialConversation, router]);
   
   useEffect(() => {
     if (scrollAreaRef.current) {
@@ -106,12 +127,12 @@ export function ChatPanel() {
   const isConversationFinished = currentQuestionIndex > botQuestions.length -1;
 
 
-  if (isFinalized && state.documents) {
-    return <DocumentViewer documents={state.documents} onReset={() => {
-        setMessages([{ role: 'assistant', content: botQuestions[0] }]);
-        setCurrentQuestionIndex(1);
-        setIsFinalized(false);
-        (initialState.documents = undefined);
+  if (isFinalized && (state.documents || initialConversation?.documents)) {
+    const documents = state.documents || initialConversation?.documents;
+    if (!documents) return null;
+    
+    return <DocumentViewer documents={documents} onReset={() => {
+        router.push('/chat');
     }} />;
   }
 
@@ -140,8 +161,8 @@ export function ChatPanel() {
                 </form>
             ) : (
                 <form onSubmit={handleSendMessage} className="flex gap-2">
-                    <Input value={inputValue} onChange={(e) => setInputValue(e.target.value)} placeholder="Type your answer..." autoComplete="off" />
-                    <Button type="submit" size="icon" disabled={!inputValue.trim()}><Send/></Button>
+                    <Input value={inputValue} onChange={(e) => setInputValue(e.target.value)} placeholder="Type your answer..." autoComplete="off" disabled={!!initialConversation} />
+                    <Button type="submit" size="icon" disabled={!inputValue.trim() || !!initialConversation}><Send/></Button>
                 </form>
             )}
             </div>
@@ -171,7 +192,7 @@ function DocumentViewer({ documents, onReset }: { documents: ChatCompletion, onR
                     <TooltipProvider>
                       <Tooltip>
                         <TooltipTrigger asChild>
-                          <Button disabled>
+                           <Button disabled>
                             <ExternalLink /> Export to Confluence
                           </Button>
                         </TooltipTrigger>
@@ -233,4 +254,4 @@ function ArtifactSection({ title, content, onCopy, icon }: { title: string, cont
     )
 }
 
-    
+type WithId<T> = T & { id: string };
