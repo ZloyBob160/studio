@@ -1,6 +1,6 @@
 'use client';
 
-import { useFormState, useFormStatus } from 'react-dom';
+import { useActionState, useFormStatus } from 'react';
 import { Lightbulb, LoaderCircle } from 'lucide-react';
 import { getImprovementSuggestionsAction } from '@/lib/actions';
 import { Button } from '@/components/ui/button';
@@ -38,7 +38,7 @@ function SubmitButton() {
 }
 
 export function PerformanceMonitor() {
-  const [state, formAction] = useFormState(
+  const [state, formAction] = useActionState(
     getImprovementSuggestionsAction,
     initialState
   );

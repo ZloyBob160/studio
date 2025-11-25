@@ -1,6 +1,6 @@
 'use client';
 
-import { useFormState, useFormStatus } from 'react-dom';
+import { useActionState, useFormStatus } from 'react';
 import { useEffect, useRef, useState, useMemo } from 'react';
 import Link from 'next/link';
 import { generateDocumentsAction } from '@/lib/actions';
@@ -60,7 +60,7 @@ export function ChatPanel() {
   const [inputValue, setInputValue] = useState('');
   const [isFinalized, setIsFinalized] = useState(false);
   
-  const [state, formAction] = useFormState(generateDocumentsAction, initialState);
+  const [state, formAction] = useActionState(generateDocumentsAction, initialState);
   const { toast } = useToast();
   const scrollAreaRef = useRef<HTMLDivElement>(null);
 
