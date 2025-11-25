@@ -10,6 +10,7 @@ import {
   GenerateRequirementsDocumentOutput,
 } from '@/ai/flows/generate-requirements-document';
 import { suggestImprovements } from '@/ai/flows/suggest-improvements';
+import { publishDocumentsToConfluence } from '@/lib/confluence';
 import { z } from 'zod';
 import type { ChatCompletion, Suggestions } from './types';
 
@@ -83,5 +84,34 @@ export async function generateDocumentsAction(
     };
   } catch (e) {
     return { error: 'Failed to generate documents. Please try again.' };
+  }
+}
+
+export async function exportDocumentsToConfluenceAction(payload: {
+  documents: ChatCompletion;
+  conversationTitle: string;
+}): Promise<
+  | { success: true; url: string; action: 'created' | 'updated'; title: string }
+  | { success: false; error: string }
+> {
+  if (!payload?.documents) {
+    return { success: false, error: 'Missing generated documents to export.' };
+  }
+
+  try {
+    const result = await publishDocumentsToConfluence({
+      documents: payload.documents,
+      conversationTitle: payload.conversationTitle,
+    });
+    return { success: true, ...result };
+  } catch (error) {
+    console.error('Confluence export failed', error);
+    return {
+      success: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : 'Unable to export documents to Confluence.',
+    };
   }
 }

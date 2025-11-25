@@ -1,9 +1,9 @@
 'use client';
 
-import { useActionState, useEffect, useRef, useState, useMemo } from 'react';
+import { useActionState, useEffect, useRef, useState, useMemo, useTransition } from 'react';
 import { useFormStatus } from 'react-dom';
 import Link from 'next/link';
-import { generateDocumentsAction } from '@/lib/actions';
+import { exportDocumentsToConfluenceAction, generateDocumentsAction } from '@/lib/actions';
 import type { Message, ChatCompletion, Conversation } from '@/lib/types';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -21,12 +21,7 @@ import { cn } from '@/lib/utils';
 import { Bot, Copy, ExternalLink, LoaderCircle, Sparkles, User, FileText, Send, ChevronsRight, Milestone, Star, CaseSensitive } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { ScrollArea } from '../ui/scroll-area';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip"
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { useFirebase } from '@/firebase';
 import { collection, doc, addDoc, serverTimestamp } from 'firebase/firestore';
 import { setDocumentNonBlocking, addDocumentNonBlocking } from '@/firebase/non-blocking-updates';
@@ -130,10 +125,18 @@ export function ChatPanel({ conversation: initialConversation }: { conversation?
   if (isFinalized && (state.documents || initialConversation?.documents)) {
     const documents = state.documents || initialConversation?.documents;
     if (!documents) return null;
-    
-    return <DocumentViewer documents={documents} onReset={() => {
-        router.push('/chat');
-    }} />;
+
+    const derivedTitle = initialConversation?.title || deriveConversationTitle(messages);
+
+    return (
+      <DocumentViewer
+        documents={documents}
+        conversationTitle={derivedTitle}
+        onReset={() => {
+          router.push('/chat');
+        }}
+      />
+    );
   }
 
   return (
@@ -171,14 +174,55 @@ export function ChatPanel({ conversation: initialConversation }: { conversation?
   );
 }
 
-function DocumentViewer({ documents, onReset }: { documents: ChatCompletion, onReset: () => void }) {
+function DocumentViewer({
+    documents,
+    onReset,
+    conversationTitle,
+}: {
+    documents: ChatCompletion,
+    onReset: () => void,
+    conversationTitle?: string,
+}) {
     const { requirements, artifacts } = documents;
+    const { toast } = useToast();
+    const [confluenceUrl, setConfluenceUrl] = useState<string | null>(null);
+    const [exportError, setExportError] = useState<string | null>(null);
+    const [isExporting, startExport] = useTransition();
+    const fallbackTitle = useMemo(() => `AnalystAI Requirements - ${new Date().toLocaleString()}`, []);
+    const effectiveTitle = conversationTitle?.trim() || fallbackTitle;
 
     const copyToClipboard = (text: string, title: string) => {
         navigator.clipboard.writeText(text);
         toast({ title: 'Copied to Clipboard', description: `${title} has been copied.` });
     }
-    const { toast } = useToast();
+
+    const handleExport = () => {
+        setExportError(null);
+        startExport(async () => {
+            const result = await exportDocumentsToConfluenceAction({
+                documents,
+                conversationTitle: effectiveTitle,
+            });
+
+            if (result.success) {
+                setConfluenceUrl(result.url);
+                toast({
+                    title: 'Exported to Confluence',
+                    description: `Page ${result.action === 'created' ? 'created' : 'updated'} successfully.`,
+                });
+            } else {
+                setConfluenceUrl(null);
+                setExportError(result.error);
+                toast({
+                    variant: 'destructive',
+                    title: 'Export failed',
+                    description: result.error,
+                });
+            }
+        })
+    }
+
+    const exportButtonLabel = confluenceUrl ? 'Update Confluence Page' : 'Export to Confluence';
 
     return (
         <div className="space-y-6">
@@ -189,20 +233,31 @@ function DocumentViewer({ documents, onReset }: { documents: ChatCompletion, onR
                 </div>
                 <div className="flex gap-2">
                     <Button onClick={onReset} variant="outline">Start New Chat</Button>
-                    <TooltipProvider>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                           <Button disabled>
-                            <ExternalLink /> Export to Confluence
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>Feature not yet implemented</p>
-                        </TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
+                    <Button onClick={handleExport} disabled={isExporting} variant="secondary">
+                        {isExporting ? <LoaderCircle className="animate-spin" /> : <ExternalLink />}
+                        {exportButtonLabel}
+                    </Button>
                 </div>
             </div>
+
+            {confluenceUrl && (
+                <Alert>
+                    <AlertTitle>Synced with Confluence</AlertTitle>
+                    <AlertDescription>
+                        View the page{' '}
+                        <Link href={confluenceUrl} target="_blank" rel="noreferrer" className="underline">
+                            in Confluence
+                        </Link>.
+                    </AlertDescription>
+                </Alert>
+            )}
+
+            {exportError && (
+                <Alert variant="destructive">
+                    <AlertTitle>Confluence export failed</AlertTitle>
+                    <AlertDescription>{exportError}</AlertDescription>
+                </Alert>
+            )}
             
             <Card>
                 <CardHeader>
@@ -252,6 +307,14 @@ function ArtifactSection({ title, content, onCopy, icon }: { title: string, cont
             </div>
         </div>
     )
+}
+
+function deriveConversationTitle(messages: Message[]): string | undefined {
+    const firstUserMessage = messages.find(message => message.role === 'user');
+    if (!firstUserMessage) return undefined;
+    const content = firstUserMessage.content.trim();
+    if (!content) return undefined;
+    return content.length > 80 ? `${content.slice(0, 77)}...` : content;
 }
 
 type WithId<T> = T & { id: string };
