@@ -1,7 +1,7 @@
 'use client';
 
-import { useActionState, useFormStatus } from 'react';
-import { useEffect, useRef, useState, useMemo } from 'react';
+import { useActionState, useEffect, useRef, useState, useMemo } from 'react';
+import { useFormStatus } from 'react-dom';
 import Link from 'next/link';
 import { generateDocumentsAction } from '@/lib/actions';
 import type { Message, ChatCompletion } from '@/lib/types';
