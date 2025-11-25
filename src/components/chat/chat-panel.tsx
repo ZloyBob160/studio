@@ -21,6 +21,12 @@ import { cn } from '@/lib/utils';
 import { Bot, Copy, ExternalLink, LoaderCircle, Sparkles, User, FileText, Send, ChevronsRight, Milestone, Star, CaseSensitive } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { ScrollArea } from '../ui/scroll-area';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 
 const botQuestions = [
   "Hello! I'm AnalystAI. To start, what business process or feature are we looking to define today?",
@@ -162,11 +168,18 @@ function DocumentViewer({ documents, onReset }: { documents: ChatCompletion, onR
                 </div>
                 <div className="flex gap-2">
                     <Button onClick={onReset} variant="outline">Start New Chat</Button>
-                    <Button asChild>
-                        <Link href="https://www.atlassian.com/software/confluence" target="_blank">
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger>
+                          <Button disabled>
                             <ExternalLink /> Export to Confluence
-                        </Link>
-                    </Button>
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Feature not yet implemented</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
                 </div>
             </div>
             
@@ -220,3 +233,4 @@ function ArtifactSection({ title, content, onCopy, icon }: { title: string, cont
     )
 }
 
+    
