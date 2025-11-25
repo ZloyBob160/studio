@@ -170,7 +170,7 @@ function DocumentViewer({ documents, onReset }: { documents: ChatCompletion, onR
                     <Button onClick={onReset} variant="outline">Start New Chat</Button>
                     <TooltipProvider>
                       <Tooltip>
-                        <TooltipTrigger>
+                        <TooltipTrigger asChild>
                           <Button disabled>
                             <ExternalLink /> Export to Confluence
                           </Button>
